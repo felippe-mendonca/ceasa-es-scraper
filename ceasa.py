@@ -14,8 +14,11 @@ CEASA_ES_SELECT_ID_DATAS = "id_sc_field_datas"
 
 @dataclass
 class CeasaESMercado:
+    nome: str
     id: str
-    name: str
+
+    def __hash__(self) -> int:
+        return hash(repr(self))
 
 
 @dataclass
@@ -41,6 +44,14 @@ class CeasaESBoletim:
     mercado: CeasaESMercado
     data: datetime
     produtos: List[Produto]
+
+    def to_matrix(self):
+        return [
+            list(self.mercado.__dict__.values())
+            + [self.data.strftime("%d/%m/%Y")]
+            + list(p.__dict__.values())
+            for p in self.produtos
+        ]
 
 
 class CeasaESScraper:
@@ -98,8 +109,8 @@ class CeasaESScraper:
             id = option.get("value")
             if id == "0":
                 continue
-            name = option.text
-            mercados.append(CeasaESMercado(id, name))
+            nome = option.text
+            mercados.append(CeasaESMercado(nome, id))
 
         return mercados
 
@@ -155,16 +166,18 @@ class CeasaESScraper:
 
     async def get_datas(self, mercado):
         url = self._make_url(CEASA_ES_BOLETIM_FILTRO_PATH)
-        data = self._build_data(mercado=mercado.id)
-        async with self.session.post(url, data=data) as response:
+        request_data = self._build_data(mercado=mercado.id)
+        async with self.session.post(url, data=request_data) as response:
             text = await response.text()
             soup = BeautifulSoup(text, "html.parser")
             return self._parse_datas(soup)
 
     async def get_boletim(self, mercado, data):
         url = self._make_url(CEASA_ES_BOLETIM_PATH)
-        data = self._build_data(nmgp_parms=self._make_nmgp_parms(mercado.id, data))
-        async with self.session.post(url, data=data) as response:
+        request_data = self._build_data(
+            nmgp_parms=self._make_nmgp_parms(mercado.id, data)
+        )
+        async with self.session.post(url, data=request_data) as response:
             text = await response.text()
             soup = BeautifulSoup(text, "html.parser")
             produtos = self._parse_produtos(soup)

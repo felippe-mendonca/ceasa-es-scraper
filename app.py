@@ -3,10 +3,10 @@ from aiohttp import ClientSession
 from datetime import datetime
 
 from ceasa import CeasaESScraper
+from spreadsheet import CeasaESSpreadsheet
 
 
-N_CONCURRENT_TAKS = 10
-
+N_CONCURRENT_TAKS = 5
 
 async def bound_requests(semaphore, predicate):
     async with semaphore:
@@ -14,31 +14,34 @@ async def bound_requests(semaphore, predicate):
 
 
 async def main():
+    sheet = CeasaESSpreadsheet()
+    sheet_boletins_ids = sheet.get_boletins()
+
     async with ClientSession() as session:
         scraper = CeasaESScraper(session)
 
-        mercado_datas = []
+        ceasa_boletins_ids = []
         mercados = await scraper.get_mercados()
         for mercado in mercados:
             datas = await scraper.get_datas(mercado)
-            mercado_datas.extend([(mercado, data) for data in datas])
+            ceasa_boletins_ids.extend([(mercado, data) for data in datas])
+        
+        boletins_to_fetch_ids = set(ceasa_boletins_ids) - set(sheet_boletins_ids)
+        print(f"{len(boletins_to_fetch_ids)} reports to fetch")
 
         semaphore = asyncio.Semaphore(N_CONCURRENT_TAKS)
-
-        async def boletim_task(mercado, data):
-            t0 = datetime.now()
-            b = await scraper.get_boletim(mercado, data)
-            took_s = (datetime.now() - t0).total_seconds()
-            print(
-                f"[{datetime.now()}] mercado={mercado.id} data={data.strftime('%d/%m/%Y')} took={took_s:.2f}s"
-            )
-            return b
-
         boletim_tasks = [
-            bound_requests(semaphore, boletim_task(mercado, data))
-            for mercado, data in mercado_datas
+            bound_requests(semaphore, scraper.get_boletim(mercado, data))
+            for mercado, data in boletins_to_fetch_ids
         ]
-        boletins = await asyncio.gather(*boletim_tasks)
+
+        boletins = []
+        for future_boletim in asyncio.as_completed(boletim_tasks):
+            boletim = await future_boletim
+            boletins.append(boletim)
+            print(f"[{datetime.now()}] mercado={boletim.mercado.id} data={boletim.data.strftime('%d/%m/%Y')}")
+
+        sheet.add_boletins(boletins)
 
 
 if __name__ == "__main__":
